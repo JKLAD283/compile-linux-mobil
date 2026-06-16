@@ -1,0 +1,69 @@
+name: Build Mobile RootFS with BusyBox
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-rootfs:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Install Cross-Compiler
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu build-essential git bzip2 make
+
+    - name: Download BusyBox Source
+      run: |
+        # En kararlı BusyBox sürümünü indiriyoruz
+        git clone --depth 1 --branch 1_36_stable https://git.busybox.net/busybox
+
+    - name: Configure BusyBox (Static Build)
+      run: |
+        cd busybox
+        # Varsayılan ayarları yükle
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+        # Terminal bağımlılığını bitirmek ve "Static" yapmak için config ayarını değiştiriyoruz
+        sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
+
+    - name: Compile and Install BusyBox
+      run: |
+        cd busybox
+        # Derle ve geçici bir klasöre yükle
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) install
+
+    - name: Create Mobile RootFS Structure
+      run: |
+        # Temel Linux klasör mimarisini oluşturuyoruz
+        mkdir -p rootfs/{bin,sbin,etc,proc,sys,usr/bin,usr/sbin,dev,root}
+        
+        # BusyBox'ın ürettiği dosyaları kök dizine kopyala
+        cp -av busybox/_install/* rootfs/
+        
+        # Grafik arayüze geçişi tetikleyecek, arka planda çalışacak ilk açılış scripti
+        mkdir -p rootfs/etc/init.d
+        cat << 'EOF' > rootfs/etc/init.d/rcS
+        #!/bin/sh
+        mount -t proc none /proc
+        mount -t sysfs none /sys
+        mount -t devtmpfs none /dev
+        echo "Mobil OS Arka Plan Servisleri Başlatıldı!"
+        # Burası ileride grafik sunucumuzu tetikleyeceğimiz yer olacak
+        EOF
+        chmod +x rootfs/etc/init.d/rcS
+
+    - name: Pack RootFS Tarball
+      run: |
+        # Klasör yapısını kaybetmeden arşivle
+        tar -cvzf rootfs.tar.gz -C rootfs .
+
+    - name: Upload RootFS Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: rpi4-mobile-rootfs
+        path: rootfs.tar.gz
