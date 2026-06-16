@@ -3,7 +3,7 @@ name: Build BusyBox for Mobile OS
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch: # Manuel başlatabilmek için
+  workflow_dispatch:
 
 jobs:
   busybox-compile:
@@ -20,34 +20,28 @@ jobs:
 
     - name: Download BusyBox Source
       run: |
-        # En kararlı ve güvenli BusyBox sürümünü çekiyoruz
         git clone --depth 1 --branch 1_36_stable https://git.busybox.net/busybox
 
     - name: Configure BusyBox (Static Build)
       run: |
         cd busybox
-        # Raspberry Pi 4 (ARM64) için varsayılan ayarları yükle
+        # Derleyiciyi baştan tanımlayarak konfigüre ediyoruz
         make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
         
-        # En Önemli Ayar: BusyBox'ı bağımsız (Static) yapıyoruz. 
-        # Böylece çalışmak için başka hiçbir Linux kütüphanesine ihtiyaç duymayacak.
+        # Statik binary olarak kilitliyoruz
         sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
 
     - name: Compile and Install
       run: |
         cd busybox
-        # GitHub sunucusunun tüm gücünü kullanarak derle ve geçici klasöre kur
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) install
+        # Hata veren kısım burasıydı; HOSTCC ve CC parametrelerini açıkça dikte ediyoruz
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=aarch64-linux-gnu-gcc HOSTCC=gcc -j$(nproc) install
 
     - name: Create Linux RootFS Structure
       run: |
-        # Bir işletim sisteminin yaşaması için şart olan temel klasörleri açıyoruz
         mkdir -p rootfs/{bin,sbin,etc,proc,sys,usr/bin,usr/sbin,dev,root}
-        
-        # BusyBox'ın ürettiği tüm komutları (ls, cd, sh vb.) rootfs içine kopyala
         cp -av busybox/_install/* rootfs/
         
-        # Sistem ilk açıldığında terminale düşmeden önce çalışacak başlatıcı script (rcS)
         mkdir -p rootfs/etc/init.d
         cat << 'EOF' > rootfs/etc/init.d/rcS
         #!/bin/sh
@@ -63,7 +57,6 @@ jobs:
 
     - name: Pack RootFS Tarball
       run: |
-        # Klasör izinlerini koruyarak her şeyi tek bir pakette topla
         tar -cvzf rootfs.tar.gz -C rootfs .
 
     - name: Upload BusyBox RootFS
