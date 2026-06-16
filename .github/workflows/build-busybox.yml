@@ -1,0 +1,73 @@
+name: Build BusyBox for Mobile OS
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # Manuel başlatabilmek için
+
+jobs:
+  busybox-compile:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Install Cross-Compiler
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu build-essential git make bzip2
+
+    - name: Download BusyBox Source
+      run: |
+        # En kararlı ve güvenli BusyBox sürümünü çekiyoruz
+        git clone --depth 1 --branch 1_36_stable https://git.busybox.net/busybox
+
+    - name: Configure BusyBox (Static Build)
+      run: |
+        cd busybox
+        # Raspberry Pi 4 (ARM64) için varsayılan ayarları yükle
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+        
+        # En Önemli Ayar: BusyBox'ı bağımsız (Static) yapıyoruz. 
+        # Böylece çalışmak için başka hiçbir Linux kütüphanesine ihtiyaç duymayacak.
+        sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
+
+    - name: Compile and Install
+      run: |
+        cd busybox
+        # GitHub sunucusunun tüm gücünü kullanarak derle ve geçici klasöre kur
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) install
+
+    - name: Create Linux RootFS Structure
+      run: |
+        # Bir işletim sisteminin yaşaması için şart olan temel klasörleri açıyoruz
+        mkdir -p rootfs/{bin,sbin,etc,proc,sys,usr/bin,usr/sbin,dev,root}
+        
+        # BusyBox'ın ürettiği tüm komutları (ls, cd, sh vb.) rootfs içine kopyala
+        cp -av busybox/_install/* rootfs/
+        
+        # Sistem ilk açıldığında terminale düşmeden önce çalışacak başlatıcı script (rcS)
+        mkdir -p rootfs/etc/init.d
+        cat << 'EOF' > rootfs/etc/init.d/rcS
+        #!/bin/sh
+        mount -t proc none /proc
+        mount -t sysfs none /sys
+        mount -t devtmpfs none /dev
+        echo "========================================"
+        echo "  MOBILES OS ARKA PLAN MOTORU CALISTI!  "
+        echo "========================================"
+        /bin/sh
+        EOF
+        chmod +x rootfs/etc/init.d/rcS
+
+    - name: Pack RootFS Tarball
+      run: |
+        # Klasör izinlerini koruyarak her şeyi tek bir pakette topla
+        tar -cvzf rootfs.tar.gz -C rootfs .
+
+    - name: Upload BusyBox RootFS
+      uses: actions/upload-artifact@v4
+      with:
+        name: rpi4-busybox-rootfs
+        path: rootfs.tar.gz
