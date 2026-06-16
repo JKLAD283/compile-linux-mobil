@@ -1,4 +1,4 @@
-name: Build Mobile Linux Kernel
+name: Build Raspberry Pi 4 Mobile Linux Kernel
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-kernel:
+  build-rpi4-kernel:
     runs-on: ubuntu-latest
 
     steps:
@@ -17,24 +17,37 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y bc bison flex libssl-dev libelf-dev \
-          gcc-aarch64-linux-gnu build-essential libncurses-dev git
+          gcc-aarch64-linux-gnu build-essential libncurses-dev git kmod
 
-    - name: Download Linux Kernel Source
+    - name: Download Official Raspberry Pi Kernel Source
       run: |
-        git clone --depth 1 --branch linux-6.1.y https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+        # Raspberry Pi'ın resmi Linux reposunu ve stabil rpi-6.1.y dalını çekiyoruz
+        git clone --depth 1 --branch rpi-6.1.y https://github.com/raspberrypi/linux.git
 
-    - name: Configure Kernel
-      run: |
-        cd linux
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
-
-    - name: Compile Kernel
+    - name: Configure Kernel for Raspberry Pi 4 (BCM2711)
       run: |
         cd linux
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image
+        # RPi4 için özel 64-bit konfigürasyonunu yüklüyoruz
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig
 
-    - name: Upload Kernel Image Artifact
+    - name: Compile Kernel, DTBs and Modules
+      run: |
+        cd linux
+        # Çekirdeği (Image), Cihaz Ağacını (DTB) ve Waveshare gibi ekranların overlay dosyalarını derliyoruz
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image dtbs modules
+
+    - name: Prepare Artifacts Bundle
+      run: |
+        mkdir -p rpi4-boot/overlays
+        # Derlenen ana çekirdeği kopyala (RPi4 64-bit için adı kernel8.img olmalı)
+        cp linux/arch/arm64/boot/Image rpi4-boot/kernel8.img
+        # Anakart tanımlama dosyalarını (DTB) kopyala
+        cp linux/arch/arm64/boot/dts/broadcom/bcm2711-rpi-4-b.dtb rpi4-boot/
+        # Waveshare ve diğer ekran overlay'lerini kopyala
+        cp linux/arch/arm64/boot/dts/overlays/*.dtbo rpi4-boot/overlays/
+
+    - name: Upload Raspberry Pi 4 Boot Files
       uses: actions/upload-artifact@v4
       with:
-        name: mobile-linux-kernel-image
-        path: linux/arch/arm64/boot/Image
+        name: rpi4-mobile-os-boot-package
+        path: rpi4-boot/
