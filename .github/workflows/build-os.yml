@@ -1,0 +1,43 @@
+name: Build Mobile Linux Kernel
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # Manuel olarak da tetikleyebilmemiz için
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Install Build Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison flex libssl-dev libelf-dev \
+          gcc-aarch64-linux-gnu build-essential libncurses-dev git
+
+    - name: Download Linux Kernel Source
+      run: |
+        # En kararlı uzun vadeli destekli (LTS) kernel sürümünü çekiyoruz
+        git clone --depth 1 --branch linux-6.1.y https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+
+    - name: Configure Kernel
+      run: |
+        cd linux
+        # Mobil cihazlar için genel bir ARM64 konfigürasyonu seçiyoruz
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+
+    - name: Compile Kernel
+      run: |
+        cd linux
+        # GitHub Actions sunucusundaki tüm işlemci çekirdeklerini kullanarak hızlıca derle
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image
+
+    - name: Upload Kernel Image Artifact
+      uses: actions/actions-toolcontain/upload-artifact@v4
+      with:
+        name: mobile-linux-kernel-image
+        path: linux/arch/arm64/boot/Image
